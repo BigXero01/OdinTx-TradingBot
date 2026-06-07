@@ -1,0 +1,38 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --tg-theme-bg-color: #0E0E0E;
+  --tg-theme-text-color: #FFFFFF;
+  --tg-theme-button-color: #F7A130;
+  --tg-theme-button-text-color: #000000;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: var(--tg-theme-bg-color, #0E0E0E);
+  color: var(--tg-theme-text-color, #fff);
+  min-height: 100dvh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Telegram safe area */
+#root {
+  padding-bottom: env(safe-area-inset-bottom, 16px);
+}
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(247, 161, 48, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(247, 161, 48, 0); }
+}
+
+.pulse-glow { animation: pulse-glow 2s infinite; }
