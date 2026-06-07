@@ -1,14 +1,12 @@
 """
 OdinTx Telegram Bot
-- /start, /help, /signals, /subscribe, /unsubscribe
-- SQLite subscriber store
-- Scheduled signal broadcasts every 4 hours via APScheduler
-- Pushes STRONG signals only to subscribers (weak/moderate on demand)
+- Persistent reply keyboard (prompt list) for quick access
+- /start, /menu, /help, /signals, /buy, /sell, /strong
+- Per-coin commands: /btc /eth /ton /sol /bnb
+- SQLite subscriber store + scheduled STRONG-signal broadcasts
 """
 import os
-import json
 import sqlite3
-import threading
 from contextlib import contextmanager
 from datetime import datetime
 
@@ -16,9 +14,12 @@ import httpx
 import telebot
 from apscheduler.schedulers.background import BackgroundScheduler
 from telebot.types import (
+    BotCommand,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     MenuButtonWebApp,
+    ReplyKeyboardMarkup,
     WebAppInfo,
 )
 from loguru import logger
@@ -32,6 +33,27 @@ API_URL    = os.getenv("ODINTX_API_URL",      "http://localhost:8000/api")
 DB_PATH    = os.getenv("SUBSCRIBERS_DB",      "subscribers.db")
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
+
+# ── Prompt list (persistent reply keyboard) ────────────────────────────────────
+
+PROMPTS = [
+    ["⚡ All Signals",    "🟢 BUY Signals"],
+    ["🔴 SELL Signals",  "🌟 Strong Only"],
+    ["₿ BTC",  "Ξ ETH",  "◎ TON"],
+    ["◎ SOL",  "⬡ BNB"],
+    ["🔔 Subscribe",     "📊 Open App"],
+]
+
+def _prompt_keyboard() -> ReplyKeyboardMarkup:
+    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
+    for row in PROMPTS:
+        kb.row(*[KeyboardButton(label) for label in row])
+    return kb
+
+def _app_inline(label: str = "Open OdinTx ↗") -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton(label, web_app=WebAppInfo(url=WEBAPP_URL)))
+    return kb
 
 # ── SQLite subscriber store ────────────────────────────────────────────────────
 
@@ -57,10 +79,8 @@ def _db():
         conn.close()
 
 def subscribe(chat_id: int, username: str | None) -> bool:
-    """Returns True if newly subscribed, False if already subscribed."""
     with _db() as conn:
-        existing = conn.execute("SELECT 1 FROM subscribers WHERE chat_id = ?", (chat_id,)).fetchone()
-        if existing:
+        if conn.execute("SELECT 1 FROM subscribers WHERE chat_id = ?", (chat_id,)).fetchone():
             return False
         conn.execute(
             "INSERT INTO subscribers (chat_id, username, joined_at) VALUES (?, ?, ?)",
@@ -70,26 +90,16 @@ def subscribe(chat_id: int, username: str | None) -> bool:
 
 def unsubscribe(chat_id: int) -> bool:
     with _db() as conn:
-        rows = conn.execute("DELETE FROM subscribers WHERE chat_id = ?", (chat_id,)).rowcount
-        return rows > 0
+        return conn.execute("DELETE FROM subscribers WHERE chat_id = ?", (chat_id,)).rowcount > 0
 
 def all_subscribers() -> list[int]:
     with _db() as conn:
         return [r["chat_id"] for r in conn.execute("SELECT chat_id FROM subscribers").fetchall()]
 
-def subscriber_count() -> int:
-    with _db() as conn:
-        return conn.execute("SELECT COUNT(*) FROM subscribers").fetchone()[0]
+# ── Signal helpers ─────────────────────────────────────────────────────────────
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
-ACTION_EMOJI = {"BUY": "🟢", "SELL": "🔴", "HOLD": "🟡"}
+ACTION_EMOJI  = {"BUY": "🟢", "SELL": "🔴", "HOLD": "🟡"}
 STRENGTH_STAR = {"STRONG": "⭐⭐⭐", "MODERATE": "⭐⭐", "WEAK": "⭐"}
-
-def _app_keyboard(label: str = "Open OdinTx") -> InlineKeyboardMarkup:
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton(label, web_app=WebAppInfo(url=WEBAPP_URL)))
-    return kb
 
 def _fetch_signals() -> list[dict]:
     with httpx.Client(timeout=20) as client:
@@ -97,19 +107,46 @@ def _fetch_signals() -> list[dict]:
         resp.raise_for_status()
         return resp.json()
 
-def _format_signal(s: dict) -> str:
-    emoji  = ACTION_EMOJI.get(s["action"], "⚪")
-    stars  = STRENGTH_STAR.get(s["strength"], "")
+def _fmt(s: dict) -> str:
     reasons = ", ".join(s.get("reasons", [])[:2])
     return (
-        f"{emoji} <b>{s['symbol']}</b> — {s['action']} {stars}\n"
-        f"   Entry:  <code>${s['price']:,.2f}</code>\n"
-        f"   Target: <code>${s['target']:,.2f}</code>\n"
-        f"   Stop:   <code>${s['stopLoss']:,.2f}</code>\n"
-        f"   Conf:   <b>{s['confidence']}%</b>  ·  {reasons}"
+        f"{ACTION_EMOJI.get(s['action'], '⚪')} <b>{s['symbol']}</b> — "
+        f"{s['action']} {STRENGTH_STAR.get(s['strength'], '')}\n"
+        f"   Entry  <code>${s['price']:,.2f}</code>  "
+        f"Target <code>${s['target']:,.2f}</code>  "
+        f"Stop <code>${s['stopLoss']:,.2f}</code>\n"
+        f"   Conf <b>{s['confidence']}%</b>  ·  {reasons}"
     )
 
-# ── Commands ───────────────────────────────────────────────────────────────────
+def _send_signals(chat_id: int, signals: list[dict], title: str):
+    if not signals:
+        bot.send_message(chat_id, f"No {title.lower()} right now. Try again shortly.",
+                         reply_markup=_prompt_keyboard())
+        return
+    lines = [f"<b>{title}</b>\n"]
+    for s in signals:
+        lines.append(_fmt(s))
+        lines.append("")
+    bot.send_message(chat_id, "\n".join(lines).strip(),
+                     reply_markup=_app_inline("Open Full Dashboard ↗"))
+
+def _signals_for(chat_id: int, *, action: str | None = None,
+                 strength: str | None = None, symbol: str | None = None, title: str):
+    bot.send_chat_action(chat_id, "typing")
+    try:
+        all_sigs = _fetch_signals()
+    except Exception as exc:
+        logger.error(f"Fetch error: {exc}")
+        bot.send_message(chat_id, "⚠️ Could not fetch signals. Try again shortly.",
+                         reply_markup=_prompt_keyboard())
+        return
+    filtered = all_sigs
+    if action:   filtered = [s for s in filtered if s["action"] == action]
+    if strength: filtered = [s for s in filtered if s["strength"] == strength]
+    if symbol:   filtered = [s for s in filtered if s["symbol"].upper() == symbol.upper()]
+    _send_signals(chat_id, filtered[:5], title)
+
+# ── Command handlers ───────────────────────────────────────────────────────────
 
 @bot.message_handler(commands=["start"])
 def cmd_start(msg):
@@ -117,76 +154,137 @@ def cmd_start(msg):
     text = (
         f"⚡ <b>Welcome to OdinTx, {name}!</b>\n\n"
         "Your AI-powered crypto trading assistant on TON.\n\n"
-        "<b>Commands:</b>\n"
-        "• /signals — latest AI trading signals\n"
-        "• /subscribe — get automatic signal alerts\n"
-        "• /unsubscribe — stop alerts\n"
-        "• /help — full command list\n\n"
-        "Tap <b>Open App</b> below for the full dashboard 👇"
+        "<b>Quick actions available below ↓</b>\n"
+        "Tap any button or type a command to get started."
     )
-    bot.send_message(msg.chat.id, text, reply_markup=_app_keyboard())
+    bot.send_message(msg.chat.id, text, reply_markup=_prompt_keyboard())
+    bot.send_message(msg.chat.id, "Tap <b>Open App</b> for the full dashboard 👇",
+                     reply_markup=_app_inline())
+
+@bot.message_handler(commands=["menu"])
+def cmd_menu(msg):
+    bot.send_message(
+        msg.chat.id,
+        "⚡ <b>OdinTx Menu</b>\n\nChoose an action:",
+        reply_markup=_prompt_keyboard(),
+    )
 
 @bot.message_handler(commands=["help"])
 def cmd_help(msg):
     text = (
         "⚡ <b>OdinTx Commands</b>\n\n"
-        "/start — welcome & open app\n"
-        "/signals — latest AI trading signals\n"
-        "/subscribe — turn on automatic signal alerts\n"
-        "/unsubscribe — turn off alerts\n"
-        "/help — this message\n\n"
-        "<i>Signals are generated using RSI, MACD & momentum analysis on live market data.</i>"
+        "<b>Signals</b>\n"
+        "/signals — all latest signals\n"
+        "/buy — BUY signals only\n"
+        "/sell — SELL signals only\n"
+        "/strong — STRONG signals only\n\n"
+        "<b>By coin</b>\n"
+        "/btc  /eth  /ton  /sol  /bnb\n\n"
+        "<b>Alerts</b>\n"
+        "/subscribe — auto alerts every 4 h\n"
+        "/unsubscribe — stop alerts\n\n"
+        "<b>App</b>\n"
+        "/start — show prompt menu\n"
+        "/help — this message"
     )
-    bot.send_message(msg.chat.id, text, reply_markup=_app_keyboard())
+    bot.send_message(msg.chat.id, text,
+                     reply_markup=_app_inline("Open Full Dashboard ↗"))
 
 @bot.message_handler(commands=["signals"])
 def cmd_signals(msg):
-    bot.send_chat_action(msg.chat.id, "typing")
-    try:
-        signals = _fetch_signals()
-    except Exception as exc:
-        logger.error(f"Signal fetch failed: {exc}")
-        bot.send_message(msg.chat.id, "⚠️ Could not fetch signals. Try again shortly.")
-        return
+    _signals_for(msg.chat.id, title="⚡ Latest AI Signals")
 
-    if not signals:
-        bot.send_message(msg.chat.id, "No signals available right now. Try again in a moment.")
-        return
+@bot.message_handler(commands=["buy"])
+def cmd_buy(msg):
+    _signals_for(msg.chat.id, action="BUY", title="🟢 BUY Signals")
 
-    lines = ["<b>⚡ Latest AI Signals</b>\n"]
-    for s in signals[:5]:
-        lines.append(_format_signal(s))
-        lines.append("")
+@bot.message_handler(commands=["sell"])
+def cmd_sell(msg):
+    _signals_for(msg.chat.id, action="SELL", title="🔴 SELL Signals")
 
-    bot.send_message(msg.chat.id, "\n".join(lines).strip(), reply_markup=_app_keyboard("Open Full Dashboard"))
+@bot.message_handler(commands=["strong"])
+def cmd_strong(msg):
+    _signals_for(msg.chat.id, strength="STRONG", title="🌟 Strong Signals")
+
+@bot.message_handler(commands=["btc"])
+def cmd_btc(msg):
+    _signals_for(msg.chat.id, symbol="BTC", title="₿ Bitcoin Signal")
+
+@bot.message_handler(commands=["eth"])
+def cmd_eth(msg):
+    _signals_for(msg.chat.id, symbol="ETH", title="Ξ Ethereum Signal")
+
+@bot.message_handler(commands=["ton"])
+def cmd_ton(msg):
+    _signals_for(msg.chat.id, symbol="TON", title="◎ Toncoin Signal")
+
+@bot.message_handler(commands=["sol"])
+def cmd_sol(msg):
+    _signals_for(msg.chat.id, symbol="SOL", title="◎ Solana Signal")
+
+@bot.message_handler(commands=["bnb"])
+def cmd_bnb(msg):
+    _signals_for(msg.chat.id, symbol="BNB", title="⬡ BNB Signal")
 
 @bot.message_handler(commands=["subscribe"])
 def cmd_subscribe(msg):
-    username = msg.from_user.username
-    if subscribe(msg.chat.id, username):
+    if subscribe(msg.chat.id, msg.from_user.username):
         bot.send_message(
             msg.chat.id,
             "✅ <b>Subscribed!</b>\n\n"
-            "You'll receive <b>STRONG</b> signal alerts automatically.\n"
+            "You'll receive <b>STRONG</b> signal alerts every 4 hours.\n"
             "Use /unsubscribe to stop at any time.",
-            reply_markup=_app_keyboard(),
+            reply_markup=_prompt_keyboard(),
         )
-        logger.info(f"New subscriber: {msg.chat.id} (@{username})")
+        logger.info(f"New subscriber: {msg.chat.id} (@{msg.from_user.username})")
     else:
-        bot.send_message(msg.chat.id, "You're already subscribed. Use /unsubscribe to stop alerts.")
+        bot.send_message(msg.chat.id,
+                         "You're already subscribed. Use /unsubscribe to stop alerts.",
+                         reply_markup=_prompt_keyboard())
 
 @bot.message_handler(commands=["unsubscribe"])
 def cmd_unsubscribe(msg):
     if unsubscribe(msg.chat.id):
-        bot.send_message(msg.chat.id, "👋 Unsubscribed. Use /subscribe to re-enable alerts anytime.")
+        bot.send_message(msg.chat.id,
+                         "👋 Unsubscribed. Use /subscribe to re-enable alerts anytime.",
+                         reply_markup=_prompt_keyboard())
     else:
-        bot.send_message(msg.chat.id, "You're not currently subscribed.")
+        bot.send_message(msg.chat.id,
+                         "You're not currently subscribed.",
+                         reply_markup=_prompt_keyboard())
+
+# ── Prompt button text handler ─────────────────────────────────────────────────
+
+PROMPT_DISPATCH = {
+    "⚡ All Signals":  lambda cid: _signals_for(cid, title="⚡ Latest AI Signals"),
+    "🟢 BUY Signals":  lambda cid: _signals_for(cid, action="BUY",    title="🟢 BUY Signals"),
+    "🔴 SELL Signals": lambda cid: _signals_for(cid, action="SELL",   title="🔴 SELL Signals"),
+    "🌟 Strong Only":  lambda cid: _signals_for(cid, strength="STRONG", title="🌟 Strong Signals"),
+    "₿ BTC":           lambda cid: _signals_for(cid, symbol="BTC",    title="₿ Bitcoin Signal"),
+    "Ξ ETH":           lambda cid: _signals_for(cid, symbol="ETH",    title="Ξ Ethereum Signal"),
+    "◎ TON":           lambda cid: _signals_for(cid, symbol="TON",    title="◎ Toncoin Signal"),
+    "◎ SOL":           lambda cid: _signals_for(cid, symbol="SOL",    title="◎ Solana Signal"),
+    "⬡ BNB":           lambda cid: _signals_for(cid, symbol="BNB",    title="⬡ BNB Signal"),
+    "🔔 Subscribe":    lambda cid: bot.send_message(
+                           cid,
+                           "Use /subscribe to enable automatic STRONG signal alerts every 4 hours.",
+                           reply_markup=_prompt_keyboard(),
+                       ),
+    "📊 Open App":     lambda cid: bot.send_message(
+                           cid,
+                           "Tap below to open the full OdinTx dashboard 👇",
+                           reply_markup=_app_inline(),
+                       ),
+}
+
+@bot.message_handler(func=lambda m: m.text in PROMPT_DISPATCH)
+def handle_prompt(msg):
+    PROMPT_DISPATCH[msg.text](msg.chat.id)
 
 # ── Scheduled broadcast ────────────────────────────────────────────────────────
 
 def _broadcast_strong_signals():
-    """Called by scheduler — push STRONG signals to all subscribers."""
-    logger.info("Scheduled broadcast: checking for strong signals...")
+    logger.info("Scheduled broadcast running...")
     try:
         signals = _fetch_signals()
     except Exception as exc:
@@ -195,34 +293,36 @@ def _broadcast_strong_signals():
 
     strong = [s for s in signals if s.get("strength") == "STRONG"]
     if not strong:
-        logger.info("No STRONG signals to broadcast.")
+        logger.info("No STRONG signals — skipping broadcast.")
         return
 
     subscribers = all_subscribers()
     if not subscribers:
         return
 
-    header = f"🚨 <b>OdinTx Signal Alert</b>  ·  {len(strong)} strong signal{'s' if len(strong) > 1 else ''}\n\n"
-    body = "\n\n".join(_format_signal(s) for s in strong)
-    text = header + body
+    text = (
+        f"🚨 <b>OdinTx Signal Alert</b>  ·  "
+        f"{len(strong)} strong signal{'s' if len(strong) > 1 else ''}\n\n"
+        + "\n\n".join(_fmt(s) for s in strong)
+    )
 
     sent = failed = 0
     for chat_id in subscribers:
         try:
-            bot.send_message(chat_id, text, reply_markup=_app_keyboard())
+            bot.send_message(chat_id, text, reply_markup=_app_inline())
             sent += 1
         except telebot.apihelper.ApiTelegramException as e:
             if "blocked" in str(e).lower() or "deactivated" in str(e).lower():
                 unsubscribe(chat_id)
-                logger.info(f"Auto-unsubscribed blocked user {chat_id}")
+                logger.info(f"Auto-unsubscribed {chat_id}")
             else:
                 failed += 1
         except Exception:
             failed += 1
 
-    logger.info(f"Broadcast done — sent: {sent}, failed: {failed}, subscribers: {len(subscribers)}")
+    logger.info(f"Broadcast — sent: {sent}  failed: {failed}  total: {len(subscribers)}")
 
-# ── Bot setup & run ────────────────────────────────────────────────────────────
+# ── Setup & run ────────────────────────────────────────────────────────────────
 
 def _set_menu_button():
     try:
@@ -231,21 +331,28 @@ def _set_menu_button():
         )
         logger.info("Menu button set")
     except Exception as exc:
-        logger.warning(f"Menu button failed: {exc}")
+        logger.warning(f"Menu button: {exc}")
 
 def _set_commands():
-    from telebot.types import BotCommand
     try:
         bot.set_my_commands([
-            BotCommand("start",       "Welcome & open app"),
-            BotCommand("signals",     "Latest AI trading signals"),
-            BotCommand("subscribe",   "Enable automatic signal alerts"),
-            BotCommand("unsubscribe", "Disable signal alerts"),
-            BotCommand("help",        "Show all commands"),
+            BotCommand("start",       "Welcome & prompt menu"),
+            BotCommand("signals",     "All latest signals"),
+            BotCommand("buy",         "BUY signals only"),
+            BotCommand("sell",        "SELL signals only"),
+            BotCommand("strong",      "STRONG signals only"),
+            BotCommand("btc",         "Bitcoin signal"),
+            BotCommand("eth",         "Ethereum signal"),
+            BotCommand("ton",         "Toncoin signal"),
+            BotCommand("sol",         "Solana signal"),
+            BotCommand("bnb",         "BNB signal"),
+            BotCommand("subscribe",   "Enable auto alerts"),
+            BotCommand("unsubscribe", "Disable alerts"),
+            BotCommand("help",        "All commands"),
         ])
-        logger.info("Bot commands set")
+        logger.info("Bot commands registered")
     except Exception as exc:
-        logger.warning(f"Commands set failed: {exc}")
+        logger.warning(f"Commands: {exc}")
 
 if __name__ == "__main__":
     if not TOKEN:
@@ -256,11 +363,10 @@ if __name__ == "__main__":
     _set_menu_button()
     _set_commands()
 
-    # Scheduler: broadcast STRONG signals every 4 hours
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(_broadcast_strong_signals, "interval", hours=4, id="broadcast")
     scheduler.start()
-    logger.info("Scheduler started — broadcasting every 4 hours")
+    logger.info("Scheduler started — broadcast every 4 h")
 
     try:
         bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=20)
