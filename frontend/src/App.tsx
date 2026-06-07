@@ -19,7 +19,7 @@ export default function App() {
   }, [])
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/app">
       <div className="flex flex-col min-h-dvh bg-surface">
         <main className="flex-1 overflow-y-auto pb-20">
           <Routes>

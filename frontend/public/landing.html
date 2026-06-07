@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OdinTx — AI Trading Signals for TON</title>
+  <meta name="description" content="AI-powered crypto trading signals built as a Telegram Mini App on TON. RSI, MACD, sentiment & on-chain intelligence in one dashboard." />
+  <meta property="og:title" content="OdinTx — AI Trading Signals for TON" />
+  <meta property="og:description" content="Get BUY/SELL/HOLD signals powered by machine learning, right inside Telegram." />
+  <meta property="og:image" content="https://odintx.app/og.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --brand: #F7A130;
+      --brand-dark: #D4881F;
+      --bg: #0A0A0A;
+      --card: #141414;
+      --border: #222;
+      --text: #F5F5F5;
+      --muted: #888;
+      --bull: #22C55E;
+      --bear: #EF4444;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; inset-x: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 24px;
+      background: rgba(10,10,10,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .logo-icon {
+      width: 34px; height: 34px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--brand) 0%, #E08A1A 100%);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; font-weight: 800; color: #000;
+    }
+    .logo-text { font-size: 18px; font-weight: 700; color: var(--text); }
+
+    .nav-cta {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 9px 18px; border-radius: 10px;
+      background: var(--brand); color: #000;
+      font-size: 14px; font-weight: 600; text-decoration: none;
+      transition: background .15s, transform .15s;
+    }
+    .nav-cta:hover { background: var(--brand-dark); transform: translateY(-1px); }
+
+    /* ── HERO ── */
+    .hero {
+      padding: 140px 24px 80px;
+      text-align: center;
+      position: relative;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+      width: 700px; height: 700px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(247,161,48,0.10) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 999px;
+      border: 1px solid rgba(247,161,48,.3);
+      background: rgba(247,161,48,.07);
+      font-size: 13px; font-weight: 500; color: var(--brand);
+      margin-bottom: 24px;
+    }
+    .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); animation: pulse 2s infinite; }
+
+    @keyframes pulse {
+      0%,100% { opacity: 1; } 50% { opacity: .4; }
+    }
+
+    h1 {
+      font-size: clamp(36px, 7vw, 72px);
+      font-weight: 800;
+      line-height: 1.08;
+      letter-spacing: -0.03em;
+      max-width: 820px;
+      margin: 0 auto 20px;
+    }
+
+    h1 span { color: var(--brand); }
+
+    .hero-sub {
+      font-size: clamp(16px, 2vw, 20px);
+      color: var(--muted);
+      max-width: 520px;
+      margin: 0 auto 40px;
+      line-height: 1.6;
+    }
+
+    .cta-group { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 15px 28px; border-radius: 14px;
+      background: var(--brand); color: #000;
+      font-size: 16px; font-weight: 700; text-decoration: none;
+      transition: background .15s, transform .15s, box-shadow .15s;
+      box-shadow: 0 0 0 0 rgba(247,161,48,0.4);
+    }
+    .btn-primary:hover {
+      background: var(--brand-dark); transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(247,161,48,0.25);
+    }
+
+    .btn-secondary {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 15px 28px; border-radius: 14px;
+      border: 1px solid var(--border); background: transparent;
+      color: var(--text); font-size: 16px; font-weight: 600; text-decoration: none;
+      transition: border-color .15s, background .15s;
+    }
+    .btn-secondary:hover { border-color: var(--brand); background: rgba(247,161,48,.05); }
+
+    /* ── STATS ── */
+    .stats {
+      display: flex; justify-content: center; gap: 48px; flex-wrap: wrap;
+      padding: 48px 24px;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .stat-item { text-align: center; }
+    .stat-value { font-size: 32px; font-weight: 800; color: var(--brand); font-family: 'JetBrains Mono', monospace; }
+    .stat-label { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+    /* ── SIGNAL PREVIEW ── */
+    .preview-section {
+      padding: 80px 24px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .section-label {
+      text-align: center;
+      font-size: 13px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .12em; color: var(--brand); margin-bottom: 12px;
+    }
+
+    h2 {
+      text-align: center;
+      font-size: clamp(26px, 4vw, 40px);
+      font-weight: 800; letter-spacing: -0.02em;
+      margin-bottom: 48px;
+    }
+
+    .signal-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+
+    .signal-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 20px;
+      transition: border-color .2s, transform .2s;
+    }
+    .signal-card:hover { border-color: rgba(247,161,48,.4); transform: translateY(-3px); }
+
+    .signal-card.buy  { border-color: rgba(34,197,94,.2);  }
+    .signal-card.sell { border-color: rgba(239,68,68,.2);  }
+    .signal-card.hold { border-color: rgba(234,179,8,.2);  }
+
+    .signal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .signal-symbol { font-size: 18px; font-weight: 700; }
+    .signal-action {
+      font-size: 12px; font-weight: 700; padding: 4px 10px;
+      border-radius: 999px; border: 1px solid;
+    }
+    .action-buy  { color: var(--bull); border-color: rgba(34,197,94,.3);  background: rgba(34,197,94,.1); }
+    .action-sell { color: var(--bear); border-color: rgba(239,68,68,.3);  background: rgba(239,68,68,.1); }
+    .action-hold { color: #EAB308;    border-color: rgba(234,179,8,.3);   background: rgba(234,179,8,.1); }
+
+    .signal-prices { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+    .price-box { background: rgba(255,255,255,.04); border-radius: 10px; padding: 8px; text-align: center; }
+    .price-label { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+    .price-val   { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; }
+    .price-val.green { color: var(--bull); }
+    .price-val.red   { color: var(--bear); }
+
+    .signal-footer { display: flex; justify-content: space-between; align-items: center; }
+    .tags { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tag { font-size: 10px; background: rgba(255,255,255,.06); padding: 3px 8px; border-radius: 999px; color: var(--muted); }
+    .confidence { font-size: 13px; font-weight: 700; color: var(--brand); }
+
+    /* ── FEATURES ── */
+    .features-section {
+      padding: 80px 24px;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+
+    .feature-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 24px;
+      transition: border-color .2s;
+    }
+    .feature-card:hover { border-color: rgba(247,161,48,.3); }
+
+    .feature-icon {
+      width: 44px; height: 44px; border-radius: 12px;
+      background: rgba(247,161,48,.12);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; margin-bottom: 16px;
+    }
+    .feature-title { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+    .feature-desc  { font-size: 14px; color: var(--muted); line-height: 1.6; }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center; padding: 40px 24px;
+      border-top: 1px solid var(--border);
+      color: var(--muted); font-size: 14px;
+    }
+    footer a { color: var(--brand); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* ── TELEGRAM ICON ── */
+    .tg-icon {
+      width: 22px; height: 22px; flex-shrink: 0;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z'/%3E%3C/svg%3E") center/contain no-repeat;
+    }
+
+    @media (max-width: 600px) {
+      nav { padding: 14px 16px; }
+      .stats { gap: 32px; }
+      h1 { font-size: 36px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <a href="/" class="logo">
+      <div class="logo-icon">⚡</div>
+      <span class="logo-text">OdinTx</span>
+    </a>
+    <a href="https://t.me/OdinTxBot" class="nav-cta" target="_blank" rel="noopener">
+      <span class="tg-icon"></span>
+      Open in Telegram
+    </a>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="badge">
+      <span class="badge-dot"></span>
+      Live on TON Network
+    </div>
+    <h1>AI Trading Signals<br />Built for <span>Telegram</span></h1>
+    <p class="hero-sub">
+      RSI, MACD, sentiment analysis &amp; on-chain intelligence — all in one
+      Telegram Mini App. Know when to buy, sell, or hold.
+    </p>
+    <div class="cta-group">
+      <a href="https://t.me/OdinTxBot" class="btn-primary" target="_blank" rel="noopener">
+        <span class="tg-icon"></span>
+        Launch OdinTx
+      </a>
+      <a href="https://github.com/BigXero01/OdinTx-TradingBot" class="btn-secondary" target="_blank" rel="noopener">
+        View on GitHub
+      </a>
+    </div>
+  </section>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat-item">
+      <div class="stat-value">5+</div>
+      <div class="stat-label">Tracked Assets</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value">3</div>
+      <div class="stat-label">Signal Indicators</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value">30s</div>
+      <div class="stat-label">Refresh Rate</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value">Free</div>
+      <div class="stat-label">Forever</div>
+    </div>
+  </div>
+
+  <!-- SIGNAL PREVIEW -->
+  <section class="preview-section">
+    <p class="section-label">Signal Engine</p>
+    <h2>Real-time AI Signals</h2>
+
+    <div class="signal-grid">
+      <div class="signal-card buy">
+        <div class="signal-header">
+          <span class="signal-symbol">BTC</span>
+          <span class="signal-action action-buy">▲ BUY · STRONG</span>
+        </div>
+        <div class="signal-prices">
+          <div class="price-box">
+            <div class="price-label">Entry</div>
+            <div class="price-val">$67,420</div>
+          </div>
+          <div class="price-box">
+            <div class="price-label">Target</div>
+            <div class="price-val green">$72,813</div>
+          </div>
+          <div class="price-box">
+            <div class="price-label">Stop</div>
+            <div class="price-val red">$64,049</div>
+          </div>
+        </div>
+        <div class="signal-footer">
+          <div class="tags">
+            <span class="tag">RSI Oversold</span>
+            <span class="tag">MACD Bullish</span>
+          </div>
+          <span class="confidence">88%</span>
+        </div>
+      </div>
+
+      <div class="signal-card sell">
+        <div class="signal-header">
+          <span class="signal-symbol">ETH</span>
+          <span class="signal-action action-sell">▼ SELL · MODERATE</span>
+        </div>
+        <div class="signal-prices">
+          <div class="price-box">
+            <div class="price-label">Entry</div>
+            <div class="price-val">$3,540</div>
+          </div>
+          <div class="price-box">
+            <div class="price-label">Target</div>
+            <div class="price-val green">$3,292</div>
+          </div>
+          <div class="price-box">
+            <div class="price-label">Stop</div>
+            <div class="price-val red">$3,681</div>
+          </div>
+        </div>
+        <div class="signal-footer">
+          <div class="tags">
+            <span class="tag">RSI Overbought</span>
+            <span class="tag">MACD Bearish</span>
+          </div>
+          <span class="confidence">74%</span>
+        </div>
+      </div>
+
+      <div class="signal-card buy">
+        <div class="signal-header">
+          <span class="signal-symbol">TON</span>
+          <span class="signal-action action-buy">▲ BUY · STRONG</span>
+        </div>
+        <div class="signal-prices">
+          <div class="price-box">
+            <div class="price-label">Entry</div>
+            <div class="price-val">$7.82</div>
+          </div>
+          <div class="price-box">
+            <div class="price-label">Target</div>
+            <div class="price-val green">$8.44</div>
+          </div>
+          <div class="price-box">
+            <div class="price-label">Stop</div>
+            <div class="price-val red">$7.42</div>
+          </div>
+        </div>
+        <div class="signal-footer">
+          <div class="tags">
+            <span class="tag">Strong Momentum</span>
+            <span class="tag">MACD Bullish</span>
+          </div>
+          <span class="confidence">82%</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features-section">
+    <p class="section-label">Features</p>
+    <h2>Everything you need to trade smarter</h2>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <div class="feature-title">Technical Analysis</div>
+        <div class="feature-desc">RSI, MACD, and momentum indicators computed on live OHLCV data. No noise, just signals.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⛓️</div>
+        <div class="feature-title">On-Chain Intelligence</div>
+        <div class="feature-desc">TON wallet portfolio tracking and jetton balances via tonapi.io in real time.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔔</div>
+        <div class="feature-title">Telegram Alerts</div>
+        <div class="feature-desc">Get BUY/SELL alerts delivered directly in Telegram. No app switching required.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">💼</div>
+        <div class="feature-title">Portfolio Tracker</div>
+        <div class="feature-desc">Connect your TON wallet and see your full portfolio with 24h P&amp;L at a glance.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <div class="feature-title">Entry / Target / Stop</div>
+        <div class="feature-desc">Every signal comes with a precise entry price, take-profit target, and stop-loss level.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🆓</div>
+        <div class="feature-title">Free Forever</div>
+        <div class="feature-desc">Core signals are free. No subscriptions, no hidden fees. Built for the TON community.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER CTA -->
+  <section style="text-align:center; padding: 48px 24px 80px;">
+    <h2 style="margin-bottom:16px;">Ready to trade smarter?</h2>
+    <p style="color:var(--muted); margin-bottom:32px; font-size:16px;">Open OdinTx in Telegram and get your first signal in seconds.</p>
+    <a href="https://t.me/OdinTxBot" class="btn-primary" style="font-size:18px; padding:18px 36px;" target="_blank" rel="noopener">
+      <span class="tg-icon"></span>
+      Open OdinTx Free
+    </a>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <p>© 2025 OdinTx · Built on <a href="https://ton.org" target="_blank" rel="noopener">TON</a> · <a href="https://github.com/BigXero01/OdinTx-TradingBot" target="_blank" rel="noopener">GitHub</a></p>
+  </footer>
+
+</body>
+</html>
