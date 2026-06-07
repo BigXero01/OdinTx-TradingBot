@@ -3,12 +3,14 @@ OdinTx Telegram Bot
 - Persistent reply keyboard (prompt list) for quick access
 - /start, /menu, /help, /signals, /buy, /sell, /strong
 - Per-coin commands: /btc /eth /ton /sol /bnb
-- SQLite subscriber store + scheduled STRONG-signal broadcasts
+- SQLite subscriber store + 6 scheduled auto-trading prompt types
 """
 import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
+
+import prompts as P
 
 import httpx
 import telebot
@@ -281,35 +283,17 @@ PROMPT_DISPATCH = {
 def handle_prompt(msg):
     PROMPT_DISPATCH[msg.text](msg.chat.id)
 
-# ── Scheduled broadcast ────────────────────────────────────────────────────────
+# ── Broadcast engine ───────────────────────────────────────────────────────────
 
-def _broadcast_strong_signals():
-    logger.info("Scheduled broadcast running...")
-    try:
-        signals = _fetch_signals()
-    except Exception as exc:
-        logger.error(f"Broadcast fetch failed: {exc}")
-        return
-
-    strong = [s for s in signals if s.get("strength") == "STRONG"]
-    if not strong:
-        logger.info("No STRONG signals — skipping broadcast.")
-        return
-
+def _push(text: str, label: str = "View Signals"):
+    """Send text to all subscribers. Auto-removes blocked users."""
     subscribers = all_subscribers()
     if not subscribers:
         return
-
-    text = (
-        f"🚨 <b>OdinTx Signal Alert</b>  ·  "
-        f"{len(strong)} strong signal{'s' if len(strong) > 1 else ''}\n\n"
-        + "\n\n".join(_fmt(s) for s in strong)
-    )
-
     sent = failed = 0
     for chat_id in subscribers:
         try:
-            bot.send_message(chat_id, text, reply_markup=_app_inline())
+            bot.send_message(chat_id, text, reply_markup=_app_inline(label))
             sent += 1
         except telebot.apihelper.ApiTelegramException as e:
             if "blocked" in str(e).lower() or "deactivated" in str(e).lower():
@@ -319,8 +303,79 @@ def _broadcast_strong_signals():
                 failed += 1
         except Exception:
             failed += 1
+    logger.info(f"Push '{label}' — sent:{sent} failed:{failed} total:{len(subscribers)}")
 
-    logger.info(f"Broadcast — sent: {sent}  failed: {failed}  total: {len(subscribers)}")
+def _get_signals_safe() -> list[dict]:
+    try:
+        return _fetch_signals()
+    except Exception as exc:
+        logger.error(f"Signal fetch error: {exc}")
+        return []
+
+# ── Auto trading prompt jobs ───────────────────────────────────────────────────
+
+def job_morning_briefing():
+    logger.info("Auto-prompt: morning briefing")
+    sigs = _get_signals_safe()
+    text = P.morning_briefing(sigs)
+    if text:
+        _push(text, "Open Dashboard ↗")
+
+def job_evening_summary():
+    logger.info("Auto-prompt: evening summary")
+    sigs = _get_signals_safe()
+    text = P.evening_summary(sigs)
+    if text:
+        _push(text, "Open Dashboard ↗")
+
+def job_strong_signals():
+    logger.info("Auto-prompt: strong signals broadcast")
+    sigs = _get_signals_safe()
+    strong = [s for s in sigs if s.get("strength") == "STRONG"]
+    if not strong:
+        logger.info("No STRONG signals — skip.")
+        return
+    header = (
+        f"🚨 <b>OdinTx Signal Alert</b>  ·  "
+        f"{len(strong)} strong signal{'s' if len(strong) > 1 else ''}\n\n"
+    )
+    text = header + "\n\n".join(_fmt(s) for s in strong)
+    _push(text, "View Signals ↗")
+
+def job_opportunity_alert():
+    logger.info("Auto-prompt: opportunity scan")
+    sigs = _get_signals_safe()
+    text = P.opportunity_alert(sigs)
+    if text:
+        _push(text, "Trade Now ↗")
+
+def job_bear_alert():
+    logger.info("Auto-prompt: bear scan")
+    sigs = _get_signals_safe()
+    text = P.bear_alert(sigs)
+    if text:
+        _push(text, "View Risk ↗")
+
+def job_high_confidence():
+    logger.info("Auto-prompt: high confidence pulse")
+    sigs = _get_signals_safe()
+    text = P.high_confidence_pulse(sigs)
+    if text:
+        _push(text, "View Signal ↗")
+
+def job_ton_pulse():
+    logger.info("Auto-prompt: TON pulse")
+    sigs = _get_signals_safe()
+    text = P.ton_pulse(sigs)
+    if text:
+        _push(text, "Open TON Portfolio ↗")
+
+def job_risk_check():
+    logger.info("Auto-prompt: risk check")
+    sigs = _get_signals_safe()
+    text = P.risk_check(sigs)
+    if text:
+        _push(text, "View Market ↗")
 
 # ── Setup & run ────────────────────────────────────────────────────────────────
 
@@ -364,9 +419,21 @@ if __name__ == "__main__":
     _set_commands()
 
     scheduler = BackgroundScheduler(timezone="UTC")
-    scheduler.add_job(_broadcast_strong_signals, "interval", hours=4, id="broadcast")
+
+    # ── Daily fixed-time prompts ──────────────────────────────────────
+    scheduler.add_job(job_morning_briefing, "cron", hour=8,  minute=0,  id="morning")
+    scheduler.add_job(job_evening_summary,  "cron", hour=18, minute=0,  id="evening")
+    scheduler.add_job(job_ton_pulse,        "cron", hour=12, minute=0,  id="ton_pulse")
+
+    # ── Interval prompts ──────────────────────────────────────────────
+    scheduler.add_job(job_strong_signals,   "interval", hours=4,  id="strong_broadcast")
+    scheduler.add_job(job_high_confidence,  "interval", hours=1,  id="high_conf")
+    scheduler.add_job(job_opportunity_alert,"interval", hours=2,  id="opportunity")
+    scheduler.add_job(job_bear_alert,       "interval", hours=2,  id="bear_alert")
+    scheduler.add_job(job_risk_check,       "interval", hours=6,  id="risk_check")
+
     scheduler.start()
-    logger.info("Scheduler started — broadcast every 4 h")
+    logger.info("Scheduler started — 8 auto-prompt jobs active")
 
     try:
         bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=20)
