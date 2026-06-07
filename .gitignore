@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.env
+
+# Node
+node_modules/
+dist/
+.eslintcache
+
+# Build
+*.log
+.DS_Store
+
+# Secrets
+*.pem
+*.key
