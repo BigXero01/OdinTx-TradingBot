@@ -3,6 +3,7 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
+    port: int = 8000
     telegram_bot_token: str = ""
     telegram_webapp_url: str = "http://localhost:5173"
     coingecko_api_key: str = ""
@@ -12,7 +13,8 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
-    cors_origins: list[str] = ["http://localhost:5173"]
+    # Accepts comma-separated string or JSON list from env
+    cors_origins: list[str] = ["http://localhost:5173", "https://*.vercel.app"]
 
     class Config:
         env_file = ".env"
