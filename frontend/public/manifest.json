@@ -1,0 +1,21 @@
+{
+  "name": "OdinTx — AI Trading Signals",
+  "short_name": "OdinTx",
+  "description": "AI-powered crypto trading signals on TON, inside Telegram.",
+  "start_url": "/app/dashboard",
+  "display": "standalone",
+  "background_color": "#0E0E0E",
+  "theme_color": "#0E0E0E",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

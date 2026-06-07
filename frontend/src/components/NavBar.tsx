@@ -2,10 +2,10 @@ import { NavLink } from 'react-router-dom'
 import { LayoutDashboard, Zap, Wallet, Settings } from 'lucide-react'
 
 const tabs = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Market' },
-  { to: '/signals', icon: Zap, label: 'Signals' },
-  { to: '/portfolio', icon: Wallet, label: 'Portfolio' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
+  { to: '/app/dashboard', icon: LayoutDashboard, label: 'Market' },
+  { to: '/app/signals', icon: Zap, label: 'Signals' },
+  { to: '/app/portfolio', icon: Wallet, label: 'Portfolio' },
+  { to: '/app/settings', icon: Settings, label: 'Settings' },
 ]
 
 export default function NavBar() {
