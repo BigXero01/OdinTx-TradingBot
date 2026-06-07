@@ -31,6 +31,19 @@ async def health():
     return {"status": "ok", "version": "0.1.0"}
 
 
+@app.get("/api/status")
+async def status():
+    from app.services.signal_engine import generate_signals
+    signals = await generate_signals()
+    strong = [s for s in signals if s.strength == "STRONG"]
+    return {
+        "status": "ok",
+        "signals": len(signals),
+        "strong_signals": len(strong),
+        "pairs": [s.symbol for s in signals],
+    }
+
+
 @app.on_event("startup")
 async def startup():
     logger.info("OdinTx API started")

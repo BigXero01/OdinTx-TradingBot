@@ -21,9 +21,15 @@ services:
       context: ./bot
       dockerfile: Dockerfile
     env_file:
-      - ./backend/.env
+      - ./bot/.env
+    environment:
+      # Override so bot talks to the api container, not localhost
+      - ODINTX_API_URL=http://api:8000/api
+    volumes:
+      - bot_data:/app/data
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
@@ -33,3 +39,6 @@ services:
     ports:
       - "5173:80"
     restart: unless-stopped
+
+volumes:
+  bot_data:
