@@ -1,11 +1,14 @@
 {
   "buildCommand": "cd frontend && pnpm install && pnpm run build",
   "outputDirectory": "frontend/dist",
+  "functions": {
+    "frontend/api/**/*.ts": { "runtime": "@vercel/node@3" }
+  },
   "routes": [
-    { "src": "^/(.*\\..+)$", "dest": "/$1" },
-    { "src": "^/(.*)$", "dest": "/index.html" }
-  ],
-  "env": {
-    "VITE_API_URL": "@odintx_api_url"
-  }
+    { "src": "^/api/market$",         "dest": "/frontend/api/market.ts"              },
+    { "src": "^/api/signals$",        "dest": "/frontend/api/signals.ts"             },
+    { "src": "^/api/portfolio/(.+)$", "dest": "/frontend/api/portfolio/[address].ts" },
+    { "src": "^/(.*\\..+)$",          "dest": "/$1"                                  },
+    { "src": "^/(.*)$",               "dest": "/index.html"                          }
+  ]
 }
